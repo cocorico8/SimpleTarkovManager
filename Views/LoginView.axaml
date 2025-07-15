@@ -1,0 +1,54 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:SimpleTarkovManager.ViewModels"
+             x:Class="SimpleTarkovManager.Views.LoginView"
+             x:DataType="vm:LoginViewModel">
+
+    <Panel Background="#1C1C1C">
+        <Border Background="#2D2D2D"
+                CornerRadius="8"
+                Padding="30"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                MinWidth="300">
+            <StackPanel Spacing="15">
+                <TextBlock Text="Launcher Login"
+                           FontSize="24"
+                           FontWeight="Light"
+                           HorizontalAlignment="Center"
+                           Foreground="White"/>
+                
+                <TextBox Text="{Binding Email}"
+                         Watermark="Email"
+                         Foreground="White"
+                         Background="#1C1C1C"
+                         BorderBrush="#5C5C5C"
+                         CornerRadius="4"/>
+                
+                <TextBox Text="{Binding Password}"
+                         PasswordChar="*"
+                         Watermark="Password"
+                         Foreground="White"
+                         Background="#1C1C1C"
+                         BorderBrush="#5C5C5C"
+                         CornerRadius="4"/>
+                
+                <Button Command="{Binding LoginCommand}"
+                        Content="Login"
+                        IsEnabled="{Binding !IsBusy}"
+                        HorizontalAlignment="Stretch"
+                        MinHeight="40"
+                        Background="#5C5C5C"
+                        Foreground="White"
+                        CornerRadius="5"/>
+                
+                <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}"/>
+                
+                <TextBlock Text="{Binding StatusMessage}"
+                           TextWrapping="Wrap"
+                           Foreground="#B0B0B0"
+                           HorizontalAlignment="Center"/>
+            </StackPanel>
+        </Border>
+    </Panel>
+</UserControl>

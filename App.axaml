@@ -1,0 +1,21 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:SimpleTarkovManager"
+             xmlns:views="using:SimpleTarkovManager.Views"
+             xmlns:vm="using:SimpleTarkovManager.ViewModels"
+             x:Class="SimpleTarkovManager.App"
+             RequestedThemeVariant="Dark">
+    
+    <Application.DataTemplates>
+        <DataTemplate DataType="{x:Type vm:LoginViewModel}">
+            <views:LoginView/>
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:MainViewModel}">
+            <views:MainView/>
+        </DataTemplate>
+    </Application.DataTemplates>
+
+    <Application.Styles>
+        <FluentTheme />
+    </Application.Styles>
+</Application>
