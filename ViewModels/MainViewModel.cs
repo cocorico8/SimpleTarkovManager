@@ -187,54 +187,59 @@ namespace SimpleTarkovManager.ViewModels
             IsRepairing = true;
             try
             {
-                var (installedVersion, status) = await _gameRepairService.GetInstalledVersionAsync(GameDirectory);
-                bool manifestIsCorrupt = installedVersion == null && (status.Contains("corrupt") || status.Contains("unknown"));
-
-                if (!File.Exists(Path.Combine(GameDirectory, "ConsistencyInfo")) || manifestIsCorrupt)
+                await Task.Run(async () =>
                 {
-                    StatusMessage = "Manifest is missing or corrupt. Downloading a fresh copy...";
-                    if (LauncherConfig == null) { StatusMessage = "Cannot repair without config."; return; }
-                    var (installInfo, errorMsg) = await _eftApiService.GetGameInstallInfoAsync();
-                    if (installInfo == null) { StatusMessage = $"Cannot get install info: {errorMsg}"; return; }
-                    
-                    var tempZipPath = Path.Combine(Path.GetTempPath(), "eft_client_repair.zip");
-                    Action<DownloadProgress> downloadProgressAction = p =>
+                    var (installedVersion, status) = await _gameRepairService.GetInstalledVersionAsync(GameDirectory);
+                    bool manifestIsCorrupt = installedVersion == null && (status.Contains("corrupt") || status.Contains("unknown"));
+
+                    if (!File.Exists(Path.Combine(GameDirectory, "ConsistencyInfo")) || manifestIsCorrupt)
                     {
-                        Dispatcher.UIThread.Invoke(() =>
+                        StatusMessage = "Manifest is missing or corrupt. Downloading a fresh copy...";
+                        if (LauncherConfig == null) { StatusMessage = "Cannot repair without config."; return; }
+                        var (installInfo, errorMsg) = await _eftApiService.GetGameInstallInfoAsync();
+                        if (installInfo == null) { StatusMessage = $"Cannot get install info: {errorMsg}"; return; }
+
+                        var tempZipPath = Path.Combine(Path.GetTempPath(), "eft_client_repair.zip");
+                        Action<DownloadProgress> downloadProgressAction = p =>
+                        {
+                            Dispatcher.UIThread.InvokeAsync(() =>
+                            {
+                                RepairPercentage = p.Percentage;
+                                RepairProgressText = $"{p.Percentage:F0}%";
+                                StatusMessage = $"Downloading manifest... ({p.SpeedBytesPerSecond / 1024 / 1024:F2} MB/s)";
+                            });
+                        };
+                        await _downloadService.DownloadFileAsync(LauncherConfig.Channels.Instances.Select(i => i.Endpoint), installInfo.DownloadUri, tempZipPath, downloadProgressAction, _cancellationTokenSource.Token);
+
+                        StatusMessage = "Extracting manifest...";
+                        await _compressionService.ExtractSingleFileAsync(tempZipPath, "ConsistencyInfo", Path.Combine(GameDirectory, "ConsistencyInfo"));
+                        File.Delete(tempZipPath);
+                    }
+
+                    StatusMessage = "Checking game files for corruption...";
+
+                    Action<RepairProgress> repairProgressAction = p =>
+                    {
+                        Dispatcher.UIThread.InvokeAsync(() =>
                         {
                             RepairPercentage = p.Percentage;
                             RepairProgressText = $"{p.Percentage:F0}%";
-                            StatusMessage = $"Downloading manifest... ({p.SpeedBytesPerSecond / 1024 / 1024:F2} MB/s)";
+                            RepairEtaText = p.ETA > TimeSpan.Zero ? $"ETA: {p.ETA:mm\\:ss}" : "ETA: Calculating...";
+                            StatusMessage = p.CurrentAction;
                         });
                     };
-                    await _downloadService.DownloadFileAsync(LauncherConfig.Channels.Instances.Select(i => i.Endpoint), installInfo.DownloadUri, tempZipPath, downloadProgressAction, _cancellationTokenSource.Token);
+                    var brokenFiles = await _gameRepairService.CheckConsistencyAsync(GameDirectory, repairProgressAction, _cancellationTokenSource.Token);
 
-                    StatusMessage = "Extracting manifest...";
-                    await _compressionService.ExtractSingleFileAsync(tempZipPath, "ConsistencyInfo", Path.Combine(GameDirectory, "ConsistencyInfo"));
-                    File.Delete(tempZipPath);
-                }
+                    if (!brokenFiles.Any())
+                    {
+                        StatusMessage = "Game integrity verified. No errors found.";
+                        await CheckGameStatusAsync(GameDirectory);
+                        return;
+                    }
 
-                StatusMessage = "Checking game files for corruption...";
-                
-                // THIS IS THE CORRECTED PROGRESS HANDLER
-                Action<RepairProgress> repairProgressAction = p =>
-                {
-                    RepairPercentage = p.Percentage;
-                    RepairProgressText = $"{p.Percentage:F0}%";
-                    RepairEtaText = p.ETA > TimeSpan.Zero ? $"ETA: {p.ETA:mm\\:ss}" : "ETA: Calculating...";
-                    StatusMessage = p.CurrentAction;
-                };
-                var brokenFiles = await _gameRepairService.CheckConsistencyAsync(GameDirectory, repairProgressAction, _cancellationTokenSource.Token);
-                
-                if (!brokenFiles.Any())
-                {
-                    StatusMessage = "Game integrity verified. No errors found.";
-                    await CheckGameStatusAsync(GameDirectory);
-                    return;
-                }
-
-                StatusMessage = $"Found {brokenFiles.Count} broken files. Repairing...";
-                await _gameRepairService.RepairFilesAsync(GameDirectory, brokenFiles, LauncherConfig.Channels.Instances.Select(i => i.Endpoint), InstallInfo.UnpackedUri, repairProgressAction, _cancellationTokenSource.Token);
+                    StatusMessage = $"Found {brokenFiles.Count} broken files. Repairing...";
+                    await _gameRepairService.RepairFilesAsync(GameDirectory, brokenFiles, LauncherConfig.Channels.Instances.Select(i => i.Endpoint), InstallInfo.UnpackedUri, repairProgressAction, _cancellationTokenSource.Token);
+                }, _cancellationTokenSource.Token);
 
                 StatusMessage = "Repair complete!";
                 await CheckGameStatusAsync(GameDirectory);
@@ -242,8 +247,7 @@ namespace SimpleTarkovManager.ViewModels
             catch (OperationCanceledException) { StatusMessage = "Repair cancelled."; }
             catch (Exception ex) { StatusMessage = $"An error occurred during repair: {ex.Message}"; }
             finally
-            {
-                IsRepairing = false;
+            {   IsRepairing = false;
                 IsCancelling = false;
                 _cancellationTokenSource?.Dispose();
                 _cancellationTokenSource = null;
@@ -346,25 +350,28 @@ namespace SimpleTarkovManager.ViewModels
                     return;
                 }
                 InstallInfo = installInfo;
-                
-                StatusMessage = "Downloading game client...";
-                var downloadServers = LauncherConfig.Channels.Instances.Select(i => i.Endpoint);
-                Action<DownloadProgress> downloadProgressAction = p =>
-                {
-                    Dispatcher.UIThread.InvokeAsync(() =>
-                    {
-                        DownloadPercentage = p.Percentage;
-                        DownloadProgressText = $"{p.Percentage:F0}%";
-                        DownloadSpeed = $"{p.SpeedBytesPerSecond / (1024 * 1024):F2} MB/s";
-                        DownloadEtaText = p.ETA > TimeSpan.Zero ? $"ETA: {p.ETA:mm\\:ss}" : "ETA: Calculating...";
-                        StatusMessage = $"Downloading... {DownloadPercentage:F0}%";
-                    });
-                };
-                Directory.CreateDirectory(GameDirectory);
-                await _downloadService.DownloadFileAsync(downloadServers, InstallInfo.DownloadUri, tempDownloadPath, downloadProgressAction, _cancellationTokenSource.Token);
 
-                StatusMessage = "Download complete. Extracting files...";
-                await Task.Run(() => ZipFile.ExtractToDirectory(tempDownloadPath, GameDirectory, true), _cancellationTokenSource.Token);
+                await Task.Run(async () =>
+                {
+                    StatusMessage = "Downloading game client...";
+                    var downloadServers = LauncherConfig.Channels.Instances.Select(i => i.Endpoint);
+                    Action<DownloadProgress> downloadProgressAction = p =>
+                    {
+                        Dispatcher.UIThread.InvokeAsync(() =>
+                        {
+                            DownloadPercentage = p.Percentage;
+                            DownloadProgressText = $"{p.Percentage:F0}%";
+                            DownloadSpeed = $"{p.SpeedBytesPerSecond / (1024 * 1024):F2} MB/s";
+                            DownloadEtaText = p.ETA > TimeSpan.Zero ? $"ETA: {p.ETA:mm\\:ss}" : "ETA: Calculating...";
+                            StatusMessage = $"Downloading... {DownloadPercentage:F0}%";
+                        });
+                    };
+                    Directory.CreateDirectory(GameDirectory);
+                    await _downloadService.DownloadFileAsync(downloadServers, InstallInfo.DownloadUri, tempDownloadPath, downloadProgressAction, _cancellationTokenSource.Token);
+
+                    StatusMessage = "Download complete. Extracting files...";
+                    ZipFile.ExtractToDirectory(tempDownloadPath, GameDirectory, true);
+                }, _cancellationTokenSource.Token);
 
                 _registryService.SetInstallPath(GameDirectory, InstallInfo.Version);
                 StatusMessage = "Installation Complete!";
@@ -397,37 +404,40 @@ namespace SimpleTarkovManager.ViewModels
                     await CheckGameStatusAsync(GameDirectory);
                     return;
                 }
-                
-                var downloadedPatchPaths = new List<string>();
-                var downloadServers = LauncherConfig.Channels.Instances.Select(i => i.Endpoint);
-                Directory.CreateDirectory(tempUpdateDir);
-                foreach (var patchInfo in updateSet.Patches)
+
+                await Task.Run(async () =>
                 {
-                    var destinationPath = Path.Combine(tempUpdateDir, Path.GetFileName(patchInfo.DownloadUri));
-                    Action<DownloadProgress> downloadProgressAction = p =>
+                    var downloadedPatchPaths = new List<string>();
+                    var downloadServers = LauncherConfig.Channels.Instances.Select(i => i.Endpoint);
+                    Directory.CreateDirectory(tempUpdateDir);
+                    foreach (var patchInfo in updateSet.Patches)
+                    {
+                        var destinationPath = Path.Combine(tempUpdateDir, Path.GetFileName(patchInfo.DownloadUri));
+                        Action<DownloadProgress> downloadProgressAction = p =>
+                        {
+                            Dispatcher.UIThread.InvokeAsync(() =>
+                            {
+                                DownloadPercentage = p.Percentage;
+                                DownloadProgressText = $"{p.Percentage:F0}%";
+                                StatusMessage = $"Downloading patch: {Path.GetFileName(patchInfo.DownloadUri)} ({p.Percentage:F0}%)";
+                            });
+                        };
+                        await _downloadService.DownloadFileAsync(downloadServers, patchInfo.DownloadUri, destinationPath, downloadProgressAction, _cancellationTokenSource.Token);
+                        downloadedPatchPaths.Add(destinationPath);
+                    }
+
+                    Action<UpdateProgressReport> updateProgressAction = report =>
                     {
                         Dispatcher.UIThread.InvokeAsync(() =>
                         {
-                            DownloadPercentage = p.Percentage;
-                            DownloadProgressText = $"{p.Percentage:F0}%";
-                            StatusMessage = $"Downloading patch: {Path.GetFileName(patchInfo.DownloadUri)} ({p.Percentage:F0}%)";
+                            ExtractionPercentage = report.Percentage;
+                            ExtractionProgressText = $"{report.Percentage:F0}%";
+                            StatusMessage = report.Message ?? "Applying patches...";
                         });
                     };
-                    await _downloadService.DownloadFileAsync(downloadServers, patchInfo.DownloadUri, destinationPath, downloadProgressAction, _cancellationTokenSource.Token);
-                    downloadedPatchPaths.Add(destinationPath);
-                }
+                    await _patchingService.ApplyUpdateAsync(downloadedPatchPaths.ToArray(), GameDirectory, updateProgressAction, _cancellationTokenSource.Token);
+                }, _cancellationTokenSource.Token);
 
-                Action<UpdateProgressReport> updateProgressAction = report =>
-                {
-                    Dispatcher.UIThread.InvokeAsync(() =>
-                    {
-                        ExtractionPercentage = report.Percentage;
-                        ExtractionProgressText = $"{report.Percentage:F0}%";
-                        StatusMessage = report.Message ?? "Applying patches...";
-                    });
-                };
-                await _patchingService.ApplyUpdateAsync(downloadedPatchPaths.ToArray(), GameDirectory, updateProgressAction, _cancellationTokenSource.Token);
-                
                 _registryService.SetInstallPath(GameDirectory, updateSet.TargetVersion.ToString());
                 StatusMessage = "Update complete!";
                 await CheckGameStatusAsync(GameDirectory);
