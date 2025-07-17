@@ -1,10 +1,10 @@
+using System;
+using System.Linq;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
-using Microsoft.Extensions.DependencyInjection;
 using System.Net;
 using System.Net.Http;
-using SimpleEFTLauncher.Services;
 using SimpleTarkovManager.Services;
 using SimpleTarkovManager.ViewModels;
 using SimpleTarkovManager.Views;
@@ -20,50 +20,59 @@ namespace SimpleTarkovManager
 
         public override void OnFrameworkInitializationCompleted()
         {
-            var services = new ServiceCollection();
-            ConfigureServices(services);
-            var serviceProvider = services.BuildServiceProvider();
-
             if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
             {
-                desktop.MainWindow = new MainWindow
-                {
-                    // Get the fully constructed ViewModel from our container.
-                    DataContext = serviceProvider.GetRequiredService<MainWindowViewModel>()
-                };
+                // --- MANUAL DEPENDENCY INJECTION WITH CONDITIONAL DEBUGGING ---
+
+                // 1. Create the base handler that is always used.
+                var baseHttpHandler = new HttpClientHandler { CookieContainer = new CookieContainer() };
+
+                // 2. Declare a variable for the final handler we will inject.
+                HttpMessageHandler finalHttpHandler;
+
+#if DEBUG
+                // 3. In DEBUG mode, we wrap the base handler with our logger.
+                //    This entire block will be completely ignored and compiled out in a Release build.
+                System.Console.WriteLine("--- LAUNCHER STARTED IN DEBUG MODE ---");
+                finalHttpHandler = new DebuggingHttpHandler(baseHttpHandler);
+#else
+                // 4. In RELEASE mode, we just use the normal, non-logging handler.
+                finalHttpHandler = baseHttpHandler;
+#endif
+
+                // 5. Create all services, injecting the 'finalHttpHandler'.
+                var hardwareService = new HardwareService();
+                var authService = new AuthService(hardwareService, finalHttpHandler);
+                var eftApiService = new EftApiService(authService, finalHttpHandler);
+                var downloadService = new DownloadService(finalHttpHandler);
+                var compressionService = new CompressionService();
+                var registryService = new RegistryService();
+                var patchingService = new PatchingService(compressionService);
+                var updateManagerService = new UpdateManagerService(eftApiService);
+                var gameRepairService = new GameRepairService(downloadService, updateManagerService, compressionService);
+                
+                var mainWindow = new MainWindow();
+                var dialogService = new DialogService();
+
+                var launchArgs = desktop.Args?.ToArray() ?? Array.Empty<string>();
+                var mainWindowViewModel = new MainWindowViewModel(
+                    authService,
+                    dialogService,
+                    registryService,
+                    eftApiService,
+                    downloadService,
+                    compressionService,
+                    gameRepairService,
+                    updateManagerService,
+                    patchingService,
+                    launchArgs
+                );
+                
+                mainWindow.DataContext = mainWindowViewModel;
+                desktop.MainWindow = mainWindow;
             }
 
             base.OnFrameworkInitializationCompleted();
-        }
-
-        private void ConfigureServices(IServiceCollection services)
-        {
-#if DEBUG
-            // This entire block will be compiled out in a Release build.
-            var baseHttpHandler = new HttpClientHandler { CookieContainer = new CookieContainer() };
-            var debuggingHttpHandler = new DebuggingHttpHandler(baseHttpHandler);
-            services.AddSingleton<HttpMessageHandler>(debuggingHttpHandler);
-#else
-            // In a Release build, we use a simple handler with a cookie container.
-            services.AddSingleton<HttpMessageHandler>(new HttpClientHandler { CookieContainer = new CookieContainer() });
-#endif
-
-            // Register all our services as Singletons (one instance for the app's lifetime).
-            services.AddSingleton<HardwareService>();
-            services.AddSingleton<AuthService>();
-            services.AddSingleton<EftApiService>();
-            services.AddSingleton<DownloadService>();
-            services.AddSingleton<CompressionService>();
-            services.AddSingleton<GameRepairService>();
-            services.AddSingleton<RegistryService>();
-            services.AddSingleton<PatchingService>();
-            services.AddSingleton<UpdateManagerService>();
-            services.AddSingleton<DialogService>();
-
-            // Register ViewModels. Transient means a new one is created every time it's requested.
-            services.AddTransient<MainWindowViewModel>();
-            services.AddTransient<LoginViewModel>();
-            services.AddTransient<MainViewModel>();
         }
     }
 }

@@ -1,5 +1,4 @@
-﻿using Avalonia.Threading;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -18,13 +17,18 @@ namespace SimpleTarkovManager.Services
         public double Percentage => TotalBytes > 0 ? (double)BytesDownloaded / TotalBytes * 100 : 0;
     }
 
-public class DownloadService
+    public class DownloadService
     {
         private readonly HttpClient _httpClient;
-
-        public DownloadService() { _httpClient = new HttpClient(); }
         
-        public async Task DownloadFileAsync(IEnumerable<string> baseUris, string relativeUri, string destinationPath, Action<DownloadProgress> progressAction, CancellationToken cancellationToken)
+        public event Action<DownloadProgress>? ProgressChanged;
+
+        public DownloadService(HttpMessageHandler httpHandler)
+        {
+            _httpClient = new HttpClient(httpHandler);
+        }
+        
+        public async Task DownloadFileAsync(IEnumerable<string> baseUris, string relativeUri, string destinationPath, CancellationToken cancellationToken, IProgress<DownloadProgress> progress = null)
         {
             foreach (var baseUri in baseUris)
             {
@@ -49,28 +53,54 @@ public class DownloadService
                         await fileStream.WriteAsync(buffer, 0, bytesRead, cancellationToken);
                         totalRead += bytesRead;
 
-                        if (stopwatch.Elapsed.TotalSeconds >= 1)
+                        if (stopwatch.Elapsed.TotalSeconds >= 0.5 || totalRead == totalBytes)
                         {
-                            var speed = (totalRead - lastReportedBytes) / stopwatch.Elapsed.TotalSeconds;
+                            var elapsedSeconds = stopwatch.Elapsed.TotalSeconds;
+                            var speed = elapsedSeconds > 0 ? (totalRead - lastReportedBytes) / elapsedSeconds : 0;
                             var eta = speed > 0 ? TimeSpan.FromSeconds((totalBytes - totalRead) / speed) : TimeSpan.Zero;
                             var report = new DownloadProgress { TotalBytes = totalBytes, BytesDownloaded = totalRead, SpeedBytesPerSecond = speed, ETA = eta };
                             
-                            // The service is now responsible for using the dispatcher
-                            Dispatcher.UIThread.Invoke(() => progressAction(report));
+                            progress?.Report(report); 
+                            ProgressChanged?.Invoke(report);
                             
                             stopwatch.Restart();
                             lastReportedBytes = totalRead;
                         }
                     }
 
-                    var finalReport = new DownloadProgress { TotalBytes = totalBytes, BytesDownloaded = totalBytes };
-                    Dispatcher.UIThread.Invoke(() => progressAction(finalReport));
                     return;
                 }
                 catch (OperationCanceledException) { throw; }
-                catch (Exception ex) { Console.WriteLine($"Failed to download from {fullUri}: {ex.Message}. Trying next server."); }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Failed to download from {fullUri}: {ex.Message}. Trying next server.");
+                }
             }
             throw new Exception("Failed to download file from all available servers.");
+        }
+        
+        public async Task RunUiConnectionTest(CancellationToken cancellationToken)
+        {
+            // This method has one job: fire the ProgressChanged event 100 times.
+            // It does not download anything.
+            for (int i = 0; i <= 100; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+        
+                var report = new DownloadProgress
+                {
+                    TotalBytes = 100,
+                    BytesDownloaded = i,
+                    SpeedBytesPerSecond = 0,
+                    ETA = TimeSpan.Zero
+                };
+
+                // Raise the event for the ViewModel to hear.
+                ProgressChanged?.Invoke(report);
+
+                // Wait a short time to simulate a real operation.
+                await Task.Delay(50, cancellationToken);
+            }
         }
     }
 }

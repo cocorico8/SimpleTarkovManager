@@ -1,13 +1,9 @@
 ﻿using System;
 using System.Diagnostics;
-using System.Linq;
+using System.Diagnostics.CodeAnalysis;
 
 namespace SimpleTarkovManager.Models
 {
-    /// <summary>
-    /// A custom version struct based on the official BsgVersion.
-    /// It correctly handles 4-part and 5-part version strings.
-    /// </summary>
     public struct EftVersion : IEquatable<EftVersion>, IComparable<EftVersion>
     {
         public byte Release { get; }
@@ -18,19 +14,13 @@ namespace SimpleTarkovManager.Models
 
         public EftVersion(byte release, ushort major, ushort minor, ushort hotfix, uint build)
         {
-            Release = release;
-            Major = major;
-            Minor = minor;
-            Hotfix = hotfix;
-            Build = build;
+            Release = release; Major = major; Minor = minor; Hotfix = hotfix; Build = build;
         }
 
-        public static bool TryParse(string? input, out EftVersion result)
+        public static bool TryParse(string? input, [NotNullWhen(true)] out EftVersion? result)
         {
-            result = default;
-            if (string.IsNullOrEmpty(input))
-                return false;
-
+            result = null;
+            if (string.IsNullOrEmpty(input)) return false;
             try
             {
                 var parts = input.Split(new[] { '.' }, StringSplitOptions.RemoveEmptyEntries);
@@ -46,26 +36,32 @@ namespace SimpleTarkovManager.Models
                 }
                 return false;
             }
-            catch
-            {
-                return false;
-            }
+            catch { return false; }
         }
-
-        public static bool TryFromFile(string filePath, out EftVersion result)
+        
+        public static bool TryFromFile(string filePath, [NotNullWhen(true)] out EftVersion? result)
         {
-            result = default;
+            result = null;
             try
             {
                 var versionInfo = FileVersionInfo.GetVersionInfo(filePath);
-                // The official launcher tries to parse ProductVersion first, which can be complex.
-                // A simpler, more reliable approach for modern EFT is to use the direct file version parts.
-                if (versionInfo.FilePrivatePart > 0)
+                if (string.IsNullOrEmpty(versionInfo.ProductVersion))
                 {
-                    result = new EftVersion((byte)versionInfo.FileMajorPart, (ushort)versionInfo.FileMinorPart, (ushort)versionInfo.FileBuildPart, 0, (uint)versionInfo.FilePrivatePart);
-                    return true;
+                    return false; // ProductVersion string is missing.
                 }
-                return false;
+
+                // Parse the string eg: "0.16.8.1-38114-1bb130aa"
+                string[] parts = versionInfo.ProductVersion.Split('-');
+                if (parts.Length < 2)
+                {
+                    return false; // The string is not in the expected "X-Y-Z" format.
+                }
+
+                // Reconstruct the full 5-part version string: "0.16.8.1.38114"
+                string fullVersionString = $"{parts[0]}.{parts[1]}";
+                
+                // Use our existing string parser to create the EftVersion struct.
+                return TryParse(fullVersionString, out result);
             }
             catch
             {
@@ -73,15 +69,7 @@ namespace SimpleTarkovManager.Models
             }
         }
 
-        public override string ToString()
-        {
-            return $"{Release}.{Major}.{Minor}.{Hotfix}.{Build}";
-        }
-
-        // --- Comparison and Equality Logic ---
-        public bool Equals(EftVersion other) => CompareTo(other) == 0;
-        public override bool Equals(object? obj) => obj is EftVersion other && Equals(other);
-        public override int GetHashCode() => HashCode.Combine(Release, Major, Minor, Hotfix, Build);
+        public override string ToString() => $"{Release}.{Major}.{Minor}.{Hotfix}.{Build}";
         public int CompareTo(EftVersion other)
         {
             if (Release.CompareTo(other.Release) != 0) return Release.CompareTo(other.Release);
@@ -90,7 +78,9 @@ namespace SimpleTarkovManager.Models
             if (Hotfix.CompareTo(other.Hotfix) != 0) return Hotfix.CompareTo(other.Hotfix);
             return Build.CompareTo(other.Build);
         }
-
+        public bool Equals(EftVersion other) => CompareTo(other) == 0;
+        public override bool Equals(object? obj) => obj is EftVersion other && Equals(other);
+        public override int GetHashCode() => HashCode.Combine(Release, Major, Minor, Hotfix, Build);
         public static bool operator ==(EftVersion left, EftVersion right) => left.Equals(right);
         public static bool operator !=(EftVersion left, EftVersion right) => !left.Equals(right);
         public static bool operator >(EftVersion left, EftVersion right) => left.CompareTo(right) > 0;

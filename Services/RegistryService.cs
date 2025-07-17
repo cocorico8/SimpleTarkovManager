@@ -1,15 +1,13 @@
 ﻿using Microsoft.Win32;
 using System;
-using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using SimpleTarkovManager.Models;
 
 namespace SimpleTarkovManager.Services
 {
-    [SuppressMessage("Interoperability", "CA1416:Valider la compatibilité de la plateforme")]
     public class RegistryService
     {
-        // We will use HKEY_CURRENT_USER to avoid needing admin rights.
+        // We use HKEY_CURRENT_USER to avoid needing admin rights.
         private const string RegistryKeyPath = @"SOFTWARE\SimpleEFTLauncher";
 
         public string? GetInstallPath()

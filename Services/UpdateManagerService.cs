@@ -22,8 +22,6 @@ namespace SimpleTarkovManager.Services
                 return null;
             }
             
-            // --- THIS IS THE CORRECTED LOGIC ---
-
             // 1. Safely find the latest version available on the server.
             EftVersion? latestVersion = null;
             foreach (var update in allUpdates)
@@ -46,7 +44,7 @@ namespace SimpleTarkovManager.Services
             // 2. Build the path from the current version to the latest version.
             var updatesDict = allUpdates.ToDictionary(u => u.FromVersion, u => u);
             var path = new List<GameUpdate>();
-            var versionTracer = currentVersion;
+            EftVersion? versionTracer = currentVersion;
 
             while (versionTracer < latestVersion.Value)
             {
@@ -61,13 +59,13 @@ namespace SimpleTarkovManager.Services
                     else
                     {
                         // The update chain is broken.
-                        return null; 
+                        return null;
                     }
                 }
                 else
                 {
                     // Could not find a patch from the current version. The chain is broken.
-                    return null; 
+                    return null;
                 }
             }
 

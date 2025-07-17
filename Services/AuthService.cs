@@ -1,7 +1,6 @@
 ﻿using System;
 using System.IO;
 using System.IO.Compression;
-using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
@@ -23,14 +22,13 @@ namespace SimpleTarkovManager.Services
             _hardwareService = hardwareService;
 
             _httpClient = new HttpClient(httpHandler);
-            _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("BsgLauncher/14.5.1.3034");
+            _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("BsgLauncher/14.5.1.3034"); // Will need to be dynamic following an official launcher version.
         }
 
         public async Task<(bool Success, string ErrorMessage)> LoginAsync(string email, string password)
         {
             string hwId = _hardwareService.GenerateHwIdV1();
             string passwordHash = GetMd5Hex(password);
-
             var payload = new { email, pass = passwordHash, hwCode = hwId, captcha = (string)null };
             var jsonPayload = JsonConvert.SerializeObject(payload);
             var httpContent = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
@@ -40,22 +38,39 @@ namespace SimpleTarkovManager.Services
                 HttpResponseMessage response = await _httpClient.PostAsync("https://launcher.escapefromtarkov.com/launcher/login", httpContent);
                 string decompressedJson = DecompressResponse(await response.Content.ReadAsByteArrayAsync());
 
-                var json = JObject.Parse(decompressedJson);
-                if (json["err"]?.Value<int>() != 0)
-                {
-                    return (false, json["errmsg"]?.Value<string>() ?? "An unknown error occurred.");
-                }
+        #if DEBUG
+                Console.WriteLine($"--- Response Body for /launcher/login ---\n{JToken.Parse(decompressedJson).ToString(Newtonsoft.Json.Formatting.Indented)}\n-------------------------------------------------");
+        #endif
 
-                var data = json["data"];
-                var authData = new AuthData
+                var json = JObject.Parse(decompressedJson);
+                var errCode = json["err"]?.Value<int>() ?? 0;
+
+                if (errCode == 0)
                 {
-                    AccessToken = data["access_token"].Value<string>(),
-                    RefreshToken = data["refresh_token"].Value<string>(),
-                    ExpiresAtUtc = DateTime.UtcNow.AddSeconds(data["expires_in"].Value<int>())
-                };
-                
-                File.WriteAllText(AuthFilePath, JsonConvert.SerializeObject(authData));
-                return (true, null);
+                    // Success!
+                    var data = json["data"];
+                    var authData = new AuthData
+                    {
+                        AccessToken = data["access_token"].Value<string>(),
+                        RefreshToken = data["refresh_token"].Value<string>(),
+                        ExpiresAtUtc = DateTime.UtcNow.AddSeconds(data["expires_in"].Value<int>())
+                    };
+                    File.WriteAllText(AuthFilePath, JsonConvert.SerializeObject(authData));
+                    return (true, null);
+                }
+                else
+                {
+                    var serverMessage = json["errmsg"]?.Value<string>() ?? "An unknown error occurred.";
+
+                    if (errCode == 214 || errCode == 206) // 206 is often "Wrong email or password"
+                    {
+                        // Provide a comprehensive message that covers both possibilities.
+                        return (false, "Wrong email or password. \n\nIt's also possible that a CAPTCHA is required because this is a new machine. If you are sure your password is correct, please log in once with the official launcher to authorize this computer.");
+                    }
+
+                    // For all other errors, return the server's message directly.
+                    return (false, serverMessage);
+                }
             }
             catch (Exception ex)
             {
@@ -70,7 +85,7 @@ namespace SimpleTarkovManager.Services
             var savedAuthData = JsonConvert.DeserializeObject<AuthData>(File.ReadAllText(AuthFilePath));
             if (savedAuthData.ExpiresAtUtc > DateTime.UtcNow.AddMinutes(5))
             {
-                return true; // Token is still valid
+                return true;
             }
 
             // Refresh the token
@@ -88,6 +103,10 @@ namespace SimpleTarkovManager.Services
             {
                 HttpResponseMessage response = await _httpClient.PostAsync("https://launcher.escapefromtarkov.com/launcher/token/refresh", httpContent);
                 string decompressedJson = DecompressResponse(await response.Content.ReadAsByteArrayAsync());
+                
+#if DEBUG
+                Console.WriteLine($"--- Response Body for /launcher/token/refresh ---\n\r{JToken.Parse(decompressedJson).ToString(Newtonsoft.Json.Formatting.Indented)}\n\r-------------------------------------------------");
+#endif
 
                 var json = JObject.Parse(decompressedJson);
                 if (json["err"]?.Value<int>() != 0)
@@ -109,14 +128,6 @@ namespace SimpleTarkovManager.Services
             catch
             {
                 return false; // Network error or other issue
-            }
-        }
-
-        public void Logout()
-        {
-            if (File.Exists(AuthFilePath))
-            {
-                File.Delete(AuthFilePath);
             }
         }
 

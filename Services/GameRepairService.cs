@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
@@ -23,63 +24,82 @@ namespace SimpleTarkovManager.Services
     public class GameRepairService
     {
         private readonly DownloadService _downloadService;
+        private readonly UpdateManagerService _updateManagerService;
+        private readonly CompressionService _compressionService;
 
-        public GameRepairService(DownloadService downloadService)
+        public GameRepairService(DownloadService downloadService, UpdateManagerService updateManagerService, CompressionService compressionService)
         {
             _downloadService = downloadService;
+            _updateManagerService = updateManagerService;
+            _compressionService = compressionService;
         }
 
-        public async Task<(EftVersion? Version, string Status)> GetInstalledVersionAsync(string gameDirectory)
+        public async Task RestoreConsistencyInfoAsync(string gamePath, GameInstallInfo latestInstallInfo, IEnumerable<string> downloadChannels, CancellationToken cancellationToken)
+        {
+            var manifestPath = Path.Combine(gamePath, "ConsistencyInfo");
+            var consistencyInfoUri = Path.Combine(latestInstallInfo.UnpackedUri, "ConsistencyInfo").Replace('\\', '/');
+            await _downloadService.DownloadFileAsync(downloadChannels, consistencyInfoUri, manifestPath, cancellationToken);
+        }
+        
+        public async Task<(EftVersion? Version, VersionStatus Status)> GetInstalledVersionAsync(string gameDirectory)
         {
             var exePath = Path.Combine(gameDirectory, "EscapeFromTarkov.exe");
             if (!File.Exists(exePath))
             {
-                return (null, "Game not installed (executable missing).");
+                return (null, VersionStatus.ExecutableMissing);
             }
 
+            // Attempt to read both versions using EftVersion.
+            EftVersion.TryFromFile(exePath, out EftVersion? exeVersion);
+
+            EftVersion? manifestVersion = null;
             var manifestPath = Path.Combine(gameDirectory, "ConsistencyInfo");
-            if (!File.Exists(manifestPath))
+            if (File.Exists(manifestPath))
             {
-                return (null, "Game files found, but version is unknown. Please Repair.");
-            }
-
-            try
-            {
-                var manifestJson = await File.ReadAllTextAsync(manifestPath);
-                if (string.IsNullOrWhiteSpace(manifestJson))
+                try
                 {
-                    return (null, "Version file is empty. Please Repair.");
+                    var manifestJson = await File.ReadAllTextAsync(manifestPath);
+                    var consistencyInfo = JsonConvert.DeserializeObject<ConsistencyInfo>(manifestJson);
+                    EftVersion.TryParse(consistencyInfo?.Version, out manifestVersion);
                 }
-
-                var consistencyInfo = JsonConvert.DeserializeObject<ConsistencyInfo>(manifestJson);
-                if (consistencyInfo == null)
-                {
-                    return (null, "Failed to parse version file. Please Repair.");
-                }
-
-                if (EftVersion.TryParse(consistencyInfo.Version, out var parsedVersion))
-                {
-                    return (parsedVersion, $"Version {parsedVersion} detected.");
-                }
-
-                return (null, "Version information is missing or invalid in ConsistencyInfo. Please Repair.");
+                catch { /* Manifest is corrupt, version remains null */ }
             }
-            catch (JsonReaderException ex)
+
+
+            // Case 1: Both versions were read successfully.
+            if (manifestVersion.HasValue && exeVersion.HasValue)
             {
-                Console.WriteLine($"JSON parsing error in ConsistencyInfo: {ex.Message}");
-                return (null, "Version file is corrupt (invalid JSON). Please Repair.");
+                if (manifestVersion.Value == exeVersion.Value)
+                {
+                    // The versions match. This is the only perfect state.
+                    return (manifestVersion.Value, VersionStatus.OK);
+                }
+                else
+                {
+                    // The versions do not match. This is a clear mismatch.
+                    return (manifestVersion, VersionStatus.VersionMismatch);
+                }
             }
-            catch (Exception ex)
+
+            // Case 2: Manifest is readable, but EXE is not.
+            if (manifestVersion.HasValue)
             {
-                Console.WriteLine($"Error reading installed game version: {ex.Message}");
-                return (null, "An unexpected error occurred while reading the version file. Please Repair.");
+                return (manifestVersion, VersionStatus.VersionMismatch);
             }
+
+            // Case 3: EXE is readable, but manifest is not.
+            if (exeVersion.HasValue)
+            {
+                return (exeVersion, VersionStatus.ManifestIsCorrupt);
+            }
+
+            // Case 4: Neither is readable.
+            return (null, VersionStatus.CriticallyCorrupt);
         }
 
-        // THE SIGNATURE IS NOW CORRECTLY 'Action<RepairProgress>'
         public async Task<List<ConsistencyEntry>> CheckConsistencyAsync(string gameDirectory, Action<RepairProgress> progressAction, CancellationToken cancellationToken)
         {
-            return await Task.Run(() =>
+            return await Task.Run(async () =>
             {
                 var brokenFiles = new List<ConsistencyEntry>();
                 var manifestPath = Path.Combine(gameDirectory, "ConsistencyInfo");
@@ -87,6 +107,8 @@ namespace SimpleTarkovManager.Services
 
                 var manifest = JsonConvert.DeserializeObject<ConsistencyInfo>(File.ReadAllText(manifestPath));
                 if (manifest == null || !manifest.Entries.Any()) return brokenFiles;
+
+                using var md5 = MD5.Create();
 
                 var totalFiles = manifest.Entries.Count;
                 var filesProcessed = 0;
@@ -96,8 +118,31 @@ namespace SimpleTarkovManager.Services
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var filePath = Path.Combine(gameDirectory, entry.Path);
-                    
+                    bool isBroken = false;
+
                     if (!File.Exists(filePath) || new FileInfo(filePath).Length != entry.Size)
+                    {
+                        isBroken = true;
+                    }
+                    else
+                    {
+                        try
+                        {
+                            using var fileStream = File.OpenRead(filePath);
+                            var hashBytes = await md5.ComputeHashAsync(fileStream, cancellationToken);
+                            var localHash = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+                            
+                            if (!string.Equals(localHash, entry.Hash, StringComparison.OrdinalIgnoreCase))                            {
+                                isBroken = true;
+                            }
+                        }
+                        catch
+                        {
+                            isBroken = true; 
+                        }
+                    }
+
+                    if (isBroken)
                     {
                         brokenFiles.Add(entry);
                     }
@@ -110,14 +155,20 @@ namespace SimpleTarkovManager.Services
                         if (filesPerSecond > 0) eta = TimeSpan.FromSeconds((totalFiles - filesProcessed) / filesPerSecond);
                     }
                     
-                    var report = new RepairProgress { TotalFiles = totalFiles, FilesProcessed = filesProcessed, CurrentAction = $"Checking: {entry.Path}", ETA = eta };
+                    var report = new RepairProgress 
+                    { 
+                        TotalFiles = totalFiles, 
+                        FilesProcessed = filesProcessed, 
+                        CurrentAction = $"Checking file {filesProcessed} of {totalFiles}: {entry.Path}",
+                        ETA = eta 
+                    };
                     Dispatcher.UIThread.Invoke(() => progressAction(report));
                 }
                 return brokenFiles;
             }, cancellationToken);
         }
 
-        // THE SIGNATURE IS NOW CORRECTLY 'Action<RepairProgress>'
+
         public async Task RepairFilesAsync(string gameDirectory, List<ConsistencyEntry> brokenFiles, IEnumerable<string> downloadChannels, string unpackedUri, Action<RepairProgress> progressAction, CancellationToken cancellationToken)
         {
             var totalFiles = brokenFiles.Count;
@@ -134,18 +185,26 @@ namespace SimpleTarkovManager.Services
                 
                 var downloadRelativeUri = Path.Combine(unpackedUri, relativePath).Replace('\\', '/');
 
-                Action<DownloadProgress> fileProgressAction = p =>
+                // Create a progress handler specifically for this file download.
+                var singleFileProgress = new Progress<DownloadProgress>(p =>
                 {
+                    // This code will run every time the DownloadService reports progress for this specific file.
                     var report = new RepairProgress
                     {
                         TotalFiles = totalFiles,
-                        FilesProcessed = filesProcessed - 1, // Show progress on the current file
-                        CurrentAction = $"Downloading ({p.Percentage:F0}%): {relativePath}"
+                        FilesProcessed = filesProcessed - 1, // Overall progress is based on *completed* files
+                        CurrentAction = $"Downloading file {filesProcessed} of {totalFiles}: {relativePath} ({p.Percentage:F0}%)"
                     };
+                    // Use the main progress action to send the update to the ViewModel.
                     Dispatcher.UIThread.Invoke(() => progressAction(report));
-                };
+                });
 
-                await _downloadService.DownloadFileAsync(downloadChannels, downloadRelativeUri, destinationPath, fileProgressAction, cancellationToken);
+                // Pass the handler to the download service.
+                await _downloadService.DownloadFileAsync(downloadChannels, downloadRelativeUri, destinationPath, cancellationToken, singleFileProgress);
+
+                // After the download is complete, update the overall progress to reflect that one more file is done.
+                var finalFileReport = new RepairProgress { TotalFiles = totalFiles, FilesProcessed = filesProcessed, CurrentAction = $"Finished downloading file {filesProcessed} of {totalFiles}." };
+                progressAction(finalFileReport);
             }
             
             var finalReport = new RepairProgress { TotalFiles = totalFiles, FilesProcessed = totalFiles, CurrentAction = "Repair complete." };

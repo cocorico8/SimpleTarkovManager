@@ -5,22 +5,22 @@ namespace SimpleTarkovManager.Models
 {
     public class ConsistencyInfo
     {
-        [JsonProperty("version")]
+        [JsonProperty("Version")]
         public string Version { get; set; }
 
-        [JsonProperty("entries")]
+        [JsonProperty("Entries")]
         public List<ConsistencyEntry> Entries { get; set; } = new();
     }
 
     public class ConsistencyEntry
     {
-        [JsonProperty("path")]
+        [JsonProperty("Path")]
         public string Path { get; set; }
 
-        [JsonProperty("size")]
+        [JsonProperty("Size")]
         public long Size { get; set; }
 
-        [JsonProperty("hash")]
+        [JsonProperty("Hash")]
         public string Hash { get; set; }
     }
 }

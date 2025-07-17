@@ -7,7 +7,7 @@ namespace SimpleTarkovManager.Models
     {
         public int Version { get; } = 2;
         public string MachineName { get; set; }
-        public string Checksum { get; set; } // handle this if needed later
+        public string Checksum { get; set; }
         public BaseboardInfo Baseboard { get; set; }
         public BiosInfo Bios { get; set; }
         public List<CpuInfo> Cpu { get; set; }

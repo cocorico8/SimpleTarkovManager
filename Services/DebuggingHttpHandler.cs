@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -18,20 +17,24 @@ namespace SimpleTarkovManager.Services
             Console.WriteLine("--- HTTP Request ---");
             Console.WriteLine($"Request: {request.Method} {request.RequestUri}");
 
-            // Log Headers
-            Console.WriteLine("Headers:");
-            foreach (var header in request.Headers)
+            if (request.Headers != null)
             {
-                Console.WriteLine($"  {header.Key}: {string.Join(", ", header.Value)}");
-            }
-            if (request.Content != null)
-            {
-                foreach (var header in request.Content.Headers)
+                // Log Headers
+                Console.WriteLine("Headers:");
+                foreach (var header in request.Headers)
                 {
                     Console.WriteLine($"  {header.Key}: {string.Join(", ", header.Value)}");
                 }
+
+                if (request.Content != null)
+                {
+                    foreach (var header in request.Content.Headers)
+                    {
+                        Console.WriteLine($"  {header.Key}: {string.Join(", ", header.Value)}");
+                    }
+                }
             }
-            
+
             // Log Request Body if it exists
             if (request.Content != null)
             {
