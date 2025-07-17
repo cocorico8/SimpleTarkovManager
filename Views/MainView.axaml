@@ -1,4 +1,4 @@
-﻿<UserControl xmlns="https://github.com/avaloniaui"
+﻿      <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -11,7 +11,6 @@
         <ScrollViewer>
             <StackPanel Spacing="20" Margin="40" MaxWidth="600">
                 <TextBlock Text="{Binding WelcomeMessage}" FontSize="32" FontWeight="Light" HorizontalAlignment="Center" Foreground="White"/>
-
 
                 <!-- Game Status Card -->
                 <Border Background="#2D2D2D" CornerRadius="8" Padding="20">
@@ -34,23 +33,10 @@
                     </StackPanel>
                 </Border>
                 
-                
-                <!-- MAIN ACTION BUTTON (PLAY OR UPDATE) -->
+                <!-- MAIN ACTION BUTTON -->
                 <Panel>
-                    <!-- This is the PLAY button, visible when the game is ready -->
-                    <!-- Not sure if I'm going to implement this, so it does nothing for now -->
-                    <Button Content="PLAY"
-                            IsVisible="{Binding !IsActionRequired}"
-                            IsEnabled="{Binding IsNotBusy}"
-                            HorizontalAlignment="Stretch" MinHeight="50" FontSize="20" FontWeight="Bold"
-                            Background="#AC0000" Foreground="White" CornerRadius="5"/>
-                    
-                    <!-- This is the Install/Update Button, visible when needed -->
-                    <Button Content="{Binding ActionButtonText}"
-                            Command="{Binding StartUpdateOrInstallCommand}"
-                            IsVisible="{Binding IsActionRequired}"
-                            HorizontalAlignment="Stretch" MinHeight="50" FontSize="18" FontWeight="SemiBold"
-                            Background="#5C5C5C" Foreground="White" CornerRadius="5"/>
+                    <Button Content="PLAY (This button doesn't do anything actually)" IsVisible="{Binding !IsActionRequired}" IsEnabled="{Binding IsNotBusy}" HorizontalAlignment="Stretch" MinHeight="50" FontSize="20" FontWeight="Bold" Background="#AC0000" Foreground="White" CornerRadius="5"/>
+                    <Button Content="{Binding ActionButtonText}" Command="{Binding StartUpdateOrInstallCommand}" IsVisible="{Binding IsActionRequired}" HorizontalAlignment="Stretch" MinHeight="50" FontSize="18" FontWeight="SemiBold" Background="#5C5C5C" Foreground="White" CornerRadius="5"/>
                 </Panel>
                 
                 <!-- Utility Card -->
@@ -63,12 +49,16 @@
                     </StackPanel>
                 </Border>
 
+                
+                <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" FontWeight="Bold" HorizontalAlignment="Center" Foreground="White" Margin="0,10,0,0"/>
+
+                <!-- This container for progress bars and the cancel button is still conditional. -->
                 <StackPanel Spacing="8" IsVisible="{Binding IsBusy}" Margin="0,10,0,0">
                     <StackPanel.Styles>
                         <Style Selector="TextBlock"><Setter Property="Foreground" Value="White"/></Style>
                         <Style Selector="TextBlock.Muted"><Setter Property="Foreground" Value="#B0B0B0"/></Style>
                     </StackPanel.Styles>
-                    <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" FontWeight="Bold" HorizontalAlignment="Center"/>
+                    
                     
                     <StackPanel Spacing="5" IsVisible="{Binding IsDownloadingAndInstalling}">
                         <TextBlock Text="Download Progress:" FontWeight="SemiBold" Margin="0,5,0,0"/>
@@ -99,7 +89,7 @@
                     
                     <Button Content="Cancel Operation" Command="{Binding CancelCurrentOperationCommand}" IsEnabled="{Binding !IsCancelling}" Background="#AC0000" Foreground="White"/>
                 </StackPanel>
-
+                
                 <Button Content="Logout" Command="{Binding LogoutCommand}" HorizontalAlignment="Center" Background="Transparent" BorderThickness="1" BorderBrush="#5C5C5C" Foreground="#B0B0B0" CornerRadius="5" Margin="0,20,0,0"/>
             </StackPanel>
         </ScrollViewer>

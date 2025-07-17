@@ -522,7 +522,7 @@ namespace SimpleTarkovManager.ViewModels
             _cancellationTokenSource = new CancellationTokenSource();
             IsDownloadingAndInstalling = true;
             var tempDownloadPath = Path.Combine(GameDirectory, "Client.zip.tmp");
-            
+
             try
             {
                 StatusMessage = "Fetching latest version info...";
@@ -531,16 +531,18 @@ namespace SimpleTarkovManager.ViewModels
                 {
                     StatusMessage = $"Failed to get install info: {errorMsg}";
                     // On a startup failure, we should stop being busy.
-                    IsDownloadingAndInstalling = false; 
+                    IsDownloadingAndInstalling = false;
                     return;
                 }
+
                 InstallInfo = installInfo;
-                
+
                 StatusMessage = "Downloading game client...";
                 var downloadServers = LauncherConfig.Channels.Instances.Select(i => i.Endpoint);
-                
+
                 Directory.CreateDirectory(GameDirectory);
-                await _downloadService.DownloadFileAsync(downloadServers, InstallInfo.DownloadUri, tempDownloadPath, _cancellationTokenSource.Token);
+                await _downloadService.DownloadFileAsync(downloadServers, InstallInfo.DownloadUri, tempDownloadPath,
+                    _cancellationTokenSource.Token);
 
                 StatusMessage = "Download complete. Extracting files...";
                 Action<double> extractionProgressAction = percentage =>
@@ -552,34 +554,31 @@ namespace SimpleTarkovManager.ViewModels
                         StatusMessage = $"Extracting... {percentage:F0}%";
                     });
                 };
-                await _compressionService.ExtractArchiveWithProgressAsync(tempDownloadPath, GameDirectory, extractionProgressAction, _cancellationTokenSource.Token);
+                await _compressionService.ExtractArchiveWithProgressAsync(tempDownloadPath, GameDirectory,
+                    extractionProgressAction, _cancellationTokenSource.Token);
 
                 _registryService.SetInstallPath(GameDirectory, InstallInfo.Version);
                 StatusMessage = "Installation Complete!";
-                
-                IsDownloadingAndInstalling = false;
-                IsCancelling = false;
-                _cancellationTokenSource?.Dispose();
-                _cancellationTokenSource = null;
-                if (File.Exists(tempDownloadPath)) File.Delete(tempDownloadPath);
 
                 await CheckGameStatusAsync(GameDirectory);
             }
-            catch (OperationCanceledException) 
-            { 
+            catch (OperationCanceledException)
+            {
                 StatusMessage = "Installation cancelled.";
-                // Clean up state and files on cancellation.
+            }
+            catch (Exception ex)
+            {
+                // On ANY other exception, set the error message.
+                // DO NOT change the IsDownloadingAndInstalling flag here. This leaves the UI visible.
+                StatusMessage = $"Installation failed: {ex.Message}";
+            }
+            finally
+            {
                 IsDownloadingAndInstalling = false;
                 IsCancelling = false;
                 _cancellationTokenSource?.Dispose();
                 _cancellationTokenSource = null;
                 if (File.Exists(tempDownloadPath)) File.Delete(tempDownloadPath);
-            }
-            catch (Exception ex) 
-            { 
-                // On ANY other exception, set the error message.
-                // DO NOT change the IsDownloadingAndInstalling flag here. This leaves the UI visible.
-                StatusMessage = $"Installation failed: {ex.Message}";
             }
         }
 
@@ -650,14 +649,17 @@ namespace SimpleTarkovManager.ViewModels
             }
             finally
             {
+                IsDownloadingAndInstalling = false;
                 _availableUpdateSet = null; // Always clear the plan after an attempt.
                 IsCancelling = false;
                 _cancellationTokenSource?.Dispose();
                 _cancellationTokenSource = null;
+                
+                if (Directory.Exists(tempUpdateDir)) Directory.Delete(tempUpdateDir, true);
             }
         }
         
-        private bool IsRunningAsAdmin()
+        private static bool IsRunningAsAdmin()
         {
             using (var identity = WindowsIdentity.GetCurrent())
             {
