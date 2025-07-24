@@ -18,61 +18,58 @@ namespace SimpleTarkovManager
             AvaloniaXamlLoader.Load(this);
         }
 
-        public override void OnFrameworkInitializationCompleted()
-        {
-            if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
-            {
-                // --- MANUAL DEPENDENCY INJECTION WITH CONDITIONAL DEBUGGING ---
+public override void OnFrameworkInitializationCompleted()
+{
+    if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+    {
+        // --- THIS IS THE FINAL, STABLE DEPENDENCY INJECTION SETUP ---
 
-                // 1. Create the base handler that is always used.
-                var baseHttpHandler = new HttpClientHandler { CookieContainer = new CookieContainer() };
-
-                // 2. Declare a variable for the final handler we will inject.
-                HttpMessageHandler finalHttpHandler;
-
+        // 1. Create all services at startup.
+        var hardwareService = new HardwareService();
+        var baseHttpHandler = new HttpClientHandler { CookieContainer = new CookieContainer() };
+        HttpMessageHandler finalHttpHandler;
 #if DEBUG
-                // 3. In DEBUG mode, we wrap the base handler with our logger.
-                //    This entire block will be completely ignored and compiled out in a Release build.
-                System.Console.WriteLine("--- LAUNCHER STARTED IN DEBUG MODE ---");
-                finalHttpHandler = new DebuggingHttpHandler(baseHttpHandler);
+        System.Console.WriteLine("--- LAUNCHER STARTED IN DEBUG MODE (Using Simple Downloader) ---");
+        finalHttpHandler = new DebuggingHttpHandler(baseHttpHandler);
 #else
-                // 4. In RELEASE mode, we just use the normal, non-logging handler.
-                finalHttpHandler = baseHttpHandler;
+        finalHttpHandler = baseHttpHandler;
 #endif
+        var authService = new AuthService(hardwareService, finalHttpHandler);
+        var eftApiService = new EftApiService(authService, finalHttpHandler);
+        
+        // Use our simple, reliable downloader as the implementation for the interface.
+        IDownloadService downloadService = new DownloadService();
 
-                // 5. Create all services, injecting the 'finalHttpHandler'.
-                var hardwareService = new HardwareService();
-                var authService = new AuthService(hardwareService, finalHttpHandler);
-                var eftApiService = new EftApiService(authService, finalHttpHandler);
-                var downloadService = new DownloadService(finalHttpHandler);
-                var compressionService = new CompressionService();
-                var registryService = new RegistryService();
-                var patchingService = new PatchingService(compressionService);
-                var updateManagerService = new UpdateManagerService(eftApiService);
-                var gameRepairService = new GameRepairService(downloadService, updateManagerService, compressionService);
-                
-                var mainWindow = new MainWindow();
-                var dialogService = new DialogService();
-
-                var launchArgs = desktop.Args?.ToArray() ?? Array.Empty<string>();
-                var mainWindowViewModel = new MainWindowViewModel(
-                    authService,
-                    dialogService,
-                    registryService,
-                    eftApiService,
-                    downloadService,
-                    compressionService,
-                    gameRepairService,
-                    updateManagerService,
-                    patchingService,
-                    launchArgs
-                );
-                
-                mainWindow.DataContext = mainWindowViewModel;
-                desktop.MainWindow = mainWindow;
-            }
-
-            base.OnFrameworkInitializationCompleted();
-        }
+        var compressionService = new CompressionService();
+        var registryService = new RegistryService();
+        var patchingService = new PatchingService(compressionService);
+        var updateManagerService = new UpdateManagerService(eftApiService);
+        var gameRepairService = new GameRepairService(downloadService);
+        var appManager = new AppManager(authService, eftApiService);
+        var dialogService = new DialogService();
+        
+        var mainWindow = new MainWindow();
+        var launchArgs = desktop.Args?.ToArray() ?? Array.Empty<string>();
+        
+        // 2. Create the MainWindowViewModel, passing it all the required services.
+        var mainWindowViewModel = new MainWindowViewModel(
+            authService,
+            appManager,
+            dialogService,
+            eftApiService,
+            registryService,
+            downloadService,
+            compressionService,
+            gameRepairService,
+            updateManagerService,
+            patchingService,
+            launchArgs
+        );
+        
+        mainWindow.DataContext = mainWindowViewModel;
+        desktop.MainWindow = mainWindow;
+    }
+    base.OnFrameworkInitializationCompleted();
+}
     }
 }

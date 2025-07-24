@@ -45,7 +45,6 @@
                         <TextBlock Text="Utilities" FontSize="18" FontWeight="SemiBold" Foreground="White"/>
                         <Button Content="REPAIR GAME" Command="{Binding RepairGameCommand}"/>
                         <Button Content="REGISTER GAME IN WINDOWS" Command="{Binding RegisterGameCommand}"/>
-                        <Button Content="RUN UI TEST" Command="{Binding RunConnectionTestCommand}" Background="Green"/>
                     </StackPanel>
                 </Border>
 

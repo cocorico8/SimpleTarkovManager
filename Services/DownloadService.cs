@@ -5,31 +5,26 @@ using System.IO;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using SimpleTarkovManager.Models;
 
 namespace SimpleTarkovManager.Services
 {
-    public class DownloadProgress
+    /// <summary>
+    /// The original, simple, single-threaded and reliable download service.
+    /// </summary>
+    public class DownloadService : IDownloadService
     {
-        public long TotalBytes { get; set; }
-        public long BytesDownloaded { get; set; }
-        public double SpeedBytesPerSecond { get; set; }
-        public TimeSpan ETA { get; set; }
-        public double Percentage => TotalBytes > 0 ? (double)BytesDownloaded / TotalBytes * 100 : 0;
-    }
-
-    public class DownloadService
-    {
-        private readonly HttpClient _httpClient;
+        // Use the Microsoft-recommended best practice of a single, shared HttpClient.
+        private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromHours(2) };
         
-        public event Action<DownloadProgress>? ProgressChanged;
+        public event Action<DownloadProgress> ProgressChanged;
 
-        public DownloadService(HttpMessageHandler httpHandler)
+        // The 'workerLimit' parameter is ignored here, as this is a single-threaded downloader.
+        // It exists only to satisfy the IDownloadService interface.
+        public async Task DownloadFileAsync(IEnumerable<string> baseUris, string relativeUri, string destinationPath, int workerLimit, CancellationToken cancellationToken)
         {
-            _httpClient = new HttpClient(httpHandler);
-        }
-        
-        public async Task DownloadFileAsync(IEnumerable<string> baseUris, string relativeUri, string destinationPath, CancellationToken cancellationToken, IProgress<DownloadProgress> progress = null)
-        {
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath));
+
             foreach (var baseUri in baseUris)
             {
                 var fullUri = new Uri(new Uri(baseUri), relativeUri);
@@ -53,54 +48,35 @@ namespace SimpleTarkovManager.Services
                         await fileStream.WriteAsync(buffer, 0, bytesRead, cancellationToken);
                         totalRead += bytesRead;
 
-                        if (stopwatch.Elapsed.TotalSeconds >= 0.5 || totalRead == totalBytes)
+                        if (stopwatch.Elapsed.TotalSeconds >= 1 || totalRead == totalBytes)
                         {
                             var elapsedSeconds = stopwatch.Elapsed.TotalSeconds;
                             var speed = elapsedSeconds > 0 ? (totalRead - lastReportedBytes) / elapsedSeconds : 0;
                             var eta = speed > 0 ? TimeSpan.FromSeconds((totalBytes - totalRead) / speed) : TimeSpan.Zero;
-                            var report = new DownloadProgress { TotalBytes = totalBytes, BytesDownloaded = totalRead, SpeedBytesPerSecond = speed, ETA = eta };
                             
-                            progress?.Report(report); 
-                            ProgressChanged?.Invoke(report);
+                            ProgressChanged?.Invoke(new DownloadProgress
+                            {
+                                BytesDownloaded = totalRead,
+                                TotalBytes = totalBytes,
+                                SpeedBytesPerSecond = speed,
+                                ETA = eta
+                            });
                             
                             stopwatch.Restart();
                             lastReportedBytes = totalRead;
                         }
                     }
-
-                    return;
+                    return; // Success!
                 }
                 catch (OperationCanceledException) { throw; }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Failed to download from {fullUri}: {ex.Message}. Trying next server.");
+#if DEBUG
+                    Console.WriteLine($"[SimpleDownloader] Failed to download from {fullUri}: {ex.Message}. Trying next server.");
+#endif
                 }
             }
             throw new Exception("Failed to download file from all available servers.");
-        }
-        
-        public async Task RunUiConnectionTest(CancellationToken cancellationToken)
-        {
-            // This method has one job: fire the ProgressChanged event 100 times.
-            // It does not download anything.
-            for (int i = 0; i <= 100; i++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-        
-                var report = new DownloadProgress
-                {
-                    TotalBytes = 100,
-                    BytesDownloaded = i,
-                    SpeedBytesPerSecond = 0,
-                    ETA = TimeSpan.Zero
-                };
-
-                // Raise the event for the ViewModel to hear.
-                ProgressChanged?.Invoke(report);
-
-                // Wait a short time to simulate a real operation.
-                await Task.Delay(50, cancellationToken);
-            }
         }
     }
 }

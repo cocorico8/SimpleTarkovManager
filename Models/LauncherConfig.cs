@@ -50,13 +50,31 @@ namespace SimpleTarkovManager.Models
 
     public class Channels
     {
+        [JsonProperty("settings")]
+        public ChannelsSettings Settings { get; set; }
+        
         [JsonProperty("instances")]
         public List<ChannelInstance> Instances { get; set; }
+    }
+    
+    public class ChannelsSettings
+    {
+        [JsonProperty("spareNodeActivationThreshold")]
+        public int SpareNodeActivationThreshold { get; set; }
+
+        [JsonProperty("spareNodeThresholdTimeoutSec")]
+        public int SpareNodeThresholdTimeoutSec { get; set; }
+
+        [JsonProperty("simultaneouslyUsedChannelsLimit")]
+        public int SimultaneouslyUsedChannelsLimit { get; set; }
     }
 
     public class ChannelInstance
     {
         [JsonProperty("endpoint")]
         public string Endpoint { get; set; }
+        
+        [JsonProperty("isSpare")]
+        public bool IsSpare { get; set; }
     }
 }

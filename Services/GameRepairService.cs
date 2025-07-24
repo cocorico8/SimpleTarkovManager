@@ -23,22 +23,18 @@ namespace SimpleTarkovManager.Services
 
     public class GameRepairService
     {
-        private readonly DownloadService _downloadService;
-        private readonly UpdateManagerService _updateManagerService;
-        private readonly CompressionService _compressionService;
+        private readonly IDownloadService _downloadService;
 
-        public GameRepairService(DownloadService downloadService, UpdateManagerService updateManagerService, CompressionService compressionService)
+        public GameRepairService(IDownloadService downloadService)
         {
             _downloadService = downloadService;
-            _updateManagerService = updateManagerService;
-            _compressionService = compressionService;
         }
 
-        public async Task RestoreConsistencyInfoAsync(string gamePath, GameInstallInfo latestInstallInfo, IEnumerable<string> downloadChannels, CancellationToken cancellationToken)
+        public async Task RestoreConsistencyInfoAsync(string gamePath, GameInstallInfo latestInstallInfo, IEnumerable<string> downloadChannels, int workerLimit, CancellationToken cancellationToken)
         {
             var manifestPath = Path.Combine(gamePath, "ConsistencyInfo");
             var consistencyInfoUri = Path.Combine(latestInstallInfo.UnpackedUri, "ConsistencyInfo").Replace('\\', '/');
-            await _downloadService.DownloadFileAsync(downloadChannels, consistencyInfoUri, manifestPath, cancellationToken);
+            await _downloadService.DownloadFileAsync(downloadChannels, consistencyInfoUri, manifestPath, workerLimit, cancellationToken);
         }
         
         public async Task<(EftVersion? Version, VersionStatus Status)> GetInstalledVersionAsync(string gameDirectory)
@@ -169,7 +165,7 @@ namespace SimpleTarkovManager.Services
         }
 
 
-        public async Task RepairFilesAsync(string gameDirectory, List<ConsistencyEntry> brokenFiles, IEnumerable<string> downloadChannels, string unpackedUri, Action<RepairProgress> progressAction, CancellationToken cancellationToken)
+        public async Task RepairFilesAsync(string gameDirectory, List<ConsistencyEntry> brokenFiles, IEnumerable<string> downloadChannels, string unpackedUri, int workerLimit, Action<RepairProgress> progressAction, CancellationToken cancellationToken)
         {
             var totalFiles = brokenFiles.Count;
             var filesProcessed = 0;
@@ -200,7 +196,7 @@ namespace SimpleTarkovManager.Services
                 });
 
                 // Pass the handler to the download service.
-                await _downloadService.DownloadFileAsync(downloadChannels, downloadRelativeUri, destinationPath, cancellationToken, singleFileProgress);
+                await _downloadService.DownloadFileAsync(downloadChannels, downloadRelativeUri, destinationPath, workerLimit, cancellationToken);
 
                 // After the download is complete, update the overall progress to reflect that one more file is done.
                 var finalFileReport = new RepairProgress { TotalFiles = totalFiles, FilesProcessed = filesProcessed, CurrentAction = $"Finished downloading file {filesProcessed} of {totalFiles}." };

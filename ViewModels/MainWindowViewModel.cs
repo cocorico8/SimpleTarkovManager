@@ -1,18 +1,22 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 using SimpleTarkovManager.Services;
+using SimpleTarkovManager.Models;
 
 namespace SimpleTarkovManager.ViewModels
 {
     public partial class MainWindowViewModel : ViewModelBase
     {
-        // We hold all the services that need to be passed down
+        // These are all the services the application might need, held here to be
+        // passed down to the MainViewModel when it's created.
         private readonly AuthService _authService;
+        private readonly AppManager _appManager;
         private readonly DialogService _dialogService;
-        private readonly RegistryService _registryService;
         private readonly EftApiService _eftApiService;
-        private readonly DownloadService _downloadService;
+        private readonly RegistryService _registryService;
+        private readonly IDownloadService _downloadService;
         private readonly CompressionService _compressionService;
         private readonly GameRepairService _gameRepairService;
         private readonly UpdateManagerService _updateManagerService;
@@ -31,10 +35,11 @@ namespace SimpleTarkovManager.ViewModels
 
         public MainWindowViewModel(
             AuthService authService,
+            AppManager appManager,
             DialogService dialogService,
-            RegistryService registryService,
             EftApiService eftApiService,
-            DownloadService downloadService,
+            RegistryService registryService,
+            IDownloadService downloadService,
             CompressionService compressionService,
             GameRepairService gameRepairService,
             UpdateManagerService updateManagerService,
@@ -42,9 +47,10 @@ namespace SimpleTarkovManager.ViewModels
             string[] launchArgs)
         {
             _authService = authService;
+            _appManager = appManager;
             _dialogService = dialogService;
-            _registryService = registryService;
             _eftApiService = eftApiService;
+            _registryService = registryService;
             _downloadService = downloadService;
             _compressionService = compressionService;
             _gameRepairService = gameRepairService;
@@ -57,8 +63,11 @@ namespace SimpleTarkovManager.ViewModels
 
         private async Task InitializeAsync()
         {
-            bool loggedIn = await _authService.LoginWithRefreshTokenAsync();
-            if (loggedIn)
+            // Run the AppManager to check login state and fetch the config.
+            await _appManager.InitializeAsync();
+
+            // Now, based on the result, show the correct view.
+            if (_appManager.LauncherConfig != null)
             {
                 ShowMainView();
             }
@@ -70,24 +79,21 @@ namespace SimpleTarkovManager.ViewModels
 
         private void ShowLoginView()
         {
-            if (CurrentViewModel is MainViewModel oldMainVm)
-            {
-                oldMainVm.OnLogout -= ShowMainView;
-                oldMainVm.Cleanup();
-            }
-
             var loginVm = new LoginViewModel(_authService);
-            loginVm.OnLoginSuccess += ShowMainView;
+            loginVm.OnLoginSuccess += () =>
+            {
+                // When login succeeds, we must re-run the initialization to get the config.
+                _ = InitializeAsync();
+            };
             CurrentViewModel = loginVm;
         }
 
         private void ShowMainView()
         {
-            if (CurrentViewModel is LoginViewModel oldLoginVm)
-            {
-                oldLoginVm.OnLoginSuccess -= ShowMainView;
-            }
-
+            // The AppManager now holds the config, which is guaranteed to be non-null here.
+            var config = _appManager.LauncherConfig;
+            
+            // Create the MainViewModel, passing it the full, final set of services it needs to do its job.
             var mainVm = new MainViewModel(
                 _dialogService,
                 _registryService,
@@ -98,6 +104,7 @@ namespace SimpleTarkovManager.ViewModels
                 _gameRepairService,
                 _updateManagerService,
                 _patchingService,
+                config,
                 _launchArgs
             );
             mainVm.OnLogout += ShowLoginView;
