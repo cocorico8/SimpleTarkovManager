@@ -1,0 +1,58 @@
+name: .NET CI and Release
+
+on:
+  push:
+    branches: [ "main" ]
+  
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+    # Step 1: Checks-out the repository under $GITHUB_WORKSPACE, so the job can access it
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # Step 2: Sets up the .NET environment
+    - name: Set up .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    # Step 3: Restores dependencies
+    - name: Restore dependencies
+      run: dotnet restore
+
+    # Step 4: Builds the project in Release configuration
+    - name: Build
+      run: dotnet build --configuration Release --no-restore
+
+    # Step 5: Runs tests
+    - name: Test
+      run: dotnet test --no-build --verbosity normal
+
+    # Step 6: Publishes the application
+    - name: Publish
+      run: dotnet publish --configuration Release --output ./app-publish -p:PublishSingleFile=true
+
+    # Step 7: Zips the published output
+    - name: Zip release assets
+      run: |
+        cd app-publish
+        zip -r ../release.zip .
+      
+    # Step 8: Creates a new GitHub Release
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        body: "New release based on the latest changes in the main branch."
+        name: "Release v${{ github.run_number }}"
+        files: "release.zip"
+        tag_name: "v${{ github.run_number }}"
+
+    
