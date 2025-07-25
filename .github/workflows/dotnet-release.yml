@@ -30,7 +30,7 @@ jobs:
 
     # Step 4: Builds the project in Release configuration
     - name: Build
-      run: dotnet build --configuration Release -r win-x64 --no-restore
+      run: dotnet build --configuration Release --no-restore
 
     # Step 5: Runs tests
     - name: Test
