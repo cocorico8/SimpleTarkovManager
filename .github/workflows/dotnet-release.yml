@@ -30,7 +30,7 @@ jobs:
 
     # Step 4: Builds the project in Release configuration
     - name: Build
-      run: dotnet build --configuration Release --no-restore
+      run: dotnet build --configuration Release -r win-x64 --no-restore
 
     # Step 5: Runs tests
     - name: Test
@@ -38,7 +38,7 @@ jobs:
 
     # Step 6: Publishes the application
     - name: Publish
-      run: dotnet publish --configuration Release --output ./app-publish -p:PublishSingleFile=true
+      run: dotnet publish --configuration Release -r win-x64 --output ./app-publish -p:PublishSingleFile=true
 
     # Step 7: Zips the published output
     - name: Zip release assets
